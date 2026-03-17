@@ -67,7 +67,7 @@ if ! gh auth status &>/dev/null; then
         echo ""
         echo "  A GitHub token with read access to engendra-labs/engendra is required."
         echo ""
-        read -rsp "  GitHub Token: " GITHUB_TOKEN
+        read -rsp "  GitHub Token: " GITHUB_TOKEN </dev/tty
         echo ""
         if [[ -z "${GITHUB_TOKEN}" ]]; then
             echo "  ERROR: GitHub token is required." >&2
