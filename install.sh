@@ -17,6 +17,17 @@ GITHUB_TOKEN="${GITHUB_TOKEN:-}"
 BRANCH=""
 COMMIT=""
 
+# ── Colors ────────────────────────────────────────────────────────────────────
+BLUE='\033[38;5;75m'
+GREEN='\033[38;5;114m'
+DIM='\033[2m'
+BOLD='\033[1m'
+R='\033[0m'
+
+step()  { echo -e "  ${BLUE}▸${R} $*"; }
+ok()    { echo -e "  ${GREEN}✓${R} $*"; }
+dim()   { echo -e "  ${DIM}$*${R}"; }
+
 # ── Argument parsing ───────────────────────────────────────────────────────────
 usage() {
     cat <<EOF
@@ -48,61 +59,65 @@ while [[ $# -gt 0 ]]; do
 done
 
 echo ""
-echo "  Engendra Installer"
-echo "  ──────────────────"
+echo -e "  ${BOLD}${BLUE}Engendra${R} ${DIM}Installer${R}"
+echo -e "  ${DIM}──────────────────${R}"
 echo ""
 
 # ── Step 1: Install GitHub CLI ─────────────────────────────────────────────────
 if ! command -v gh &>/dev/null; then
-    echo "[install] Installing GitHub CLI..."
+    step "Installing GitHub CLI..."
     sudo apt-get update -qq >/dev/null 2>&1
     sudo apt-get install -y gh -qq >/dev/null 2>&1
+    ok "GitHub CLI installed"
 else
-    echo "[install] GitHub CLI already installed."
+    ok "GitHub CLI ready"
 fi
 
 # ── Step 2: Authenticate with GitHub ──────────────────────────────────────────
 if ! gh auth status &>/dev/null; then
     if [[ -z "${GITHUB_TOKEN}" ]]; then
         echo ""
-        echo "  A GitHub token with read access to engendra-labs/engendra is required."
+        dim "A GitHub token with read access to engendra-labs/engendra is required."
         echo ""
         read -rsp "  GitHub Token: " GITHUB_TOKEN </dev/tty
         echo ""
         if [[ -z "${GITHUB_TOKEN}" ]]; then
-            echo "  ERROR: GitHub token is required." >&2
+            echo -e "  ${BOLD}\033[31mError:${R} GitHub token is required." >&2
             exit 1
         fi
     fi
-    echo "[install] Authenticating with GitHub..."
+    step "Authenticating with GitHub..."
     gh auth login --with-token <<< "${GITHUB_TOKEN}"
+    ok "Authenticated"
 else
-    echo "[install] GitHub already authenticated."
+    ok "GitHub authenticated"
 fi
 
 # ── Step 3: Clone or update the engendra repo ────────────────────────────────
 if [[ ! -d "${REPO_DIR}/.git" ]]; then
-    echo "[install] Cloning engendra repo to ${REPO_DIR}..."
+    step "Cloning repository..."
     if [[ -n "${BRANCH}" ]]; then
         gh repo clone engendra-labs/engendra "${REPO_DIR}" -- --branch "${BRANCH}"
     else
         gh repo clone engendra-labs/engendra "${REPO_DIR}"
     fi
+    ok "Repository cloned to ${REPO_DIR}"
 else
-    echo "[install] Repo already cloned — pulling latest changes..."
+    step "Pulling latest changes..."
     if [[ -n "${BRANCH}" ]]; then
         git -C "${REPO_DIR}" checkout "${BRANCH}"
     fi
     git -C "${REPO_DIR}" pull
+    ok "Repository updated"
 fi
 
 if [[ -n "${COMMIT}" ]]; then
-    echo "[install] Checking out commit ${COMMIT}..."
+    step "Checking out commit ${COMMIT}..."
     git -C "${REPO_DIR}" checkout "${COMMIT}"
 fi
 
 # ── Step 4: Launch setup wizard ───────────────────────────────────────────────
 echo ""
-echo "[install] Repo ready. Launching setup wizard..."
+ok "Ready. Launching setup..."
 echo ""
 exec bash "${REPO_DIR}/manager/scripts/wizard.sh"
