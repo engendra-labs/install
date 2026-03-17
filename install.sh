@@ -105,4 +105,4 @@ fi
 echo ""
 echo "[install] Repo ready. Launching setup wizard..."
 echo ""
-exec bash "${REPO_DIR}/manager/scripts/wizard.sh" --no-ui
+exec bash "${REPO_DIR}/manager/scripts/wizard.sh"
