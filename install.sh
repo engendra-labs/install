@@ -10,12 +10,14 @@ set -euo pipefail
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/engendra-labs/install/main/install.sh | bash
 #   bash install.sh
+#   curl -fsSL https://raw.githubusercontent.com/engendra-labs/install/main/install.sh | bash -s -- --verbose
 #   bash install.sh --branch feat/my-branch
 
 REPO_DIR="${HOME}/engendra"
 GITHUB_TOKEN="${GITHUB_TOKEN:-}"
 BRANCH=""
 COMMIT=""
+VERBOSE="${ENGENDRA_VERBOSE:-0}"
 
 # ── Colors ────────────────────────────────────────────────────────────────────
 BLUE='\033[38;5;75m'
@@ -27,6 +29,7 @@ R='\033[0m'
 step()  { echo -e "  ${BLUE}▸${R} $*"; }
 ok()    { echo -e "  ${GREEN}✓${R} $*"; }
 dim()   { echo -e "  ${DIM}$*${R}"; }
+verbose_enabled() { [[ "${VERBOSE}" == "1" ]]; }
 
 # ── Argument parsing ───────────────────────────────────────────────────────────
 usage() {
@@ -39,10 +42,12 @@ Options:
   --repo-dir PATH         Where to clone the repo (default: ~/engendra)
   --branch BRANCH         Git branch to clone/checkout (default: repo default branch)
   --commit HASH           Git commit hash to checkout after cloning
+  -v, --verbose           Print installer and setup command output
   -h, --help              Show this help message
 
 Credentials can be set via environment variables:
   GITHUB_TOKEN            GitHub Personal Access Token (read access to engendra-labs/engendra)
+  ENGENDRA_VERBOSE=1      Same as --verbose
 
 All other credentials (API keys) are entered during the setup wizard.
 EOF
@@ -53,10 +58,13 @@ while [[ $# -gt 0 ]]; do
         --repo-dir)      REPO_DIR="$2";           shift 2 ;;
         --branch)        BRANCH="$2";             shift 2 ;;
         --commit)        COMMIT="$2";            shift 2 ;;
+        -v|--verbose)    VERBOSE=1;               shift ;;
         -h|--help)       usage; exit 0 ;;
         *) echo "Unknown option: $1" >&2; usage; exit 1 ;;
     esac
 done
+
+export ENGENDRA_VERBOSE="${VERBOSE}"
 
 echo ""
 echo -e "  ${BOLD}${BLUE}Engendra${R} ${DIM}Installer${R}"
@@ -66,8 +74,13 @@ echo ""
 # ── Step 1: Install GitHub CLI ─────────────────────────────────────────────────
 if ! command -v gh &>/dev/null; then
     step "Installing GitHub CLI..."
-    sudo apt-get update -qq >/dev/null 2>&1
-    sudo apt-get install -y gh -qq >/dev/null 2>&1
+    if verbose_enabled; then
+        sudo apt-get update
+        sudo apt-get install -y gh
+    else
+        sudo apt-get update -qq >/dev/null 2>&1
+        sudo apt-get install -y gh -qq >/dev/null 2>&1
+    fi
     ok "GitHub CLI installed"
 else
     ok "GitHub CLI ready"
@@ -120,4 +133,8 @@ fi
 echo ""
 ok "Ready. Launching setup..."
 echo ""
-exec bash "${REPO_DIR}/manager/scripts/wizard.sh"
+wizard_args=()
+if verbose_enabled; then
+    wizard_args+=(--verbose)
+fi
+exec env ENGENDRA_VERBOSE="${VERBOSE}" bash "${REPO_DIR}/manager/scripts/wizard.sh" "${wizard_args[@]}"
