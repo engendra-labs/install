@@ -31,6 +31,93 @@ ok()    { echo -e "  ${GREEN}✓${R} $*"; }
 dim()   { echo -e "  ${DIM}$*${R}"; }
 verbose_enabled() { [[ "${VERBOSE}" == "1" ]]; }
 
+prepare_cli_install_helper() {
+    local helper_path="${REPO_DIR}/manager/scripts/install_cli.sh"
+    local wizard_path="${REPO_DIR}/manager/scripts/wizard.sh"
+    local server_path="${REPO_DIR}/setup/server.py"
+
+    if [[ ! -d "${REPO_DIR}/cli" || ! -f "${wizard_path}" || ! -f "${server_path}" ]]; then
+        return 0
+    fi
+
+    step "Preparing CLI installer..."
+
+    mkdir -p "$(dirname "${helper_path}")"
+    cat > "${helper_path}" <<'EOF'
+#!/bin/bash
+set -euo pipefail
+
+CLI_DIR="${1:-}"
+if [[ -z "${CLI_DIR}" || ! -d "${CLI_DIR}" ]]; then
+    echo "Engendra CLI source directory not found: ${CLI_DIR:-<missing>}" >&2
+    exit 1
+fi
+
+PYTHON_BIN=""
+for candidate in python3.12 python3.11 python3.10 python3; do
+    if command -v "${candidate}" >/dev/null 2>&1 && "${candidate}" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' >/dev/null 2>&1; then
+        PYTHON_BIN="$(command -v "${candidate}")"
+        break
+    fi
+done
+
+if [[ -z "${PYTHON_BIN}" ]]; then
+    echo "Python 3.10 or newer is required to install the Engendra CLI." >&2
+    exit 1
+fi
+
+INSTALL_ROOT="${HOME}/.local/share/engendra-cli"
+VENV_DIR="${INSTALL_ROOT}/venv"
+BIN_DIR="${HOME}/.local/bin"
+
+mkdir -p "${INSTALL_ROOT}" "${BIN_DIR}"
+
+if [[ ! -x "${VENV_DIR}/bin/python" ]]; then
+    rm -rf "${VENV_DIR}"
+    if ! "${PYTHON_BIN}" -m venv "${VENV_DIR}" >/dev/null 2>&1; then
+        PY_VER="$("${PYTHON_BIN}" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+        if command -v sudo >/dev/null 2>&1; then
+            sudo apt-get update -qq >/dev/null 2>&1 || true
+            sudo apt-get install -y "python${PY_VER}-venv" -qq >/dev/null 2>&1 || sudo apt-get install -y python3-venv -qq >/dev/null 2>&1
+        fi
+        "${PYTHON_BIN}" -m venv "${VENV_DIR}"
+    fi
+fi
+
+"${VENV_DIR}/bin/python" -m pip install --quiet --upgrade pip >/dev/null 2>&1 || true
+"${VENV_DIR}/bin/python" -m pip install --quiet --editable "${CLI_DIR}"
+ln -sf "${VENV_DIR}/bin/engendra" "${BIN_DIR}/engendra"
+
+if [[ ":${PATH}:" != *":${BIN_DIR}:"* ]]; then
+    echo "Engendra CLI installed to ${BIN_DIR}/engendra. Add ${BIN_DIR} to PATH if the command is not found." >&2
+fi
+EOF
+    chmod +x "${helper_path}"
+
+    python3 - "${wizard_path}" "${server_path}" <<'PY'
+from pathlib import Path
+import sys
+
+wizard_path = Path(sys.argv[1])
+server_path = Path(sys.argv[2])
+
+wizard_old = '        pip install -e "${REPO_DIR}/cli" --quiet 2>/dev/null || pip3 install -e "${REPO_DIR}/cli" --quiet 2>/dev/null'
+wizard_new = '        bash "${REPO_DIR}/manager/scripts/install_cli.sh" "${REPO_DIR}/cli"'
+server_old = '        parts.append(f"pip install -e {cli_dir} --quiet 2>/dev/null || pip3 install -e {cli_dir} --quiet 2>/dev/null")'
+server_new = '        parts.append(f"bash \\"{REPO_DIR / \'manager\' / \'scripts\' / \'install_cli.sh\'}\\" \\"{cli_dir}\\"")'
+
+wizard_text = wizard_path.read_text()
+if wizard_new not in wizard_text and wizard_old in wizard_text:
+    wizard_path.write_text(wizard_text.replace(wizard_old, wizard_new))
+
+server_text = server_path.read_text()
+if server_new not in server_text and server_old in server_text:
+    server_path.write_text(server_text.replace(server_old, server_new))
+PY
+
+    ok "CLI installer ready"
+}
+
 # ── Argument parsing ───────────────────────────────────────────────────────────
 usage() {
     cat <<EOF
@@ -128,6 +215,8 @@ if [[ -n "${COMMIT}" ]]; then
     step "Checking out commit ${COMMIT}..."
     git -C "${REPO_DIR}" checkout "${COMMIT}"
 fi
+
+prepare_cli_install_helper
 
 # ── Step 4: Launch setup wizard ───────────────────────────────────────────────
 echo ""
