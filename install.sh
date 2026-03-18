@@ -101,18 +101,31 @@ import sys
 wizard_path = Path(sys.argv[1])
 server_path = Path(sys.argv[2])
 
-wizard_old = '        pip install -e "${REPO_DIR}/cli" --quiet 2>/dev/null || pip3 install -e "${REPO_DIR}/cli" --quiet 2>/dev/null'
-wizard_new = '        bash "${REPO_DIR}/manager/scripts/install_cli.sh" "${REPO_DIR}/cli"'
-server_old = '        parts.append(f"pip install -e {cli_dir} --quiet 2>/dev/null || pip3 install -e {cli_dir} --quiet 2>/dev/null")'
-server_new = '        parts.append(f"bash \\"{REPO_DIR / \'manager\' / \'scripts\' / \'install_cli.sh\'}\\" \\"{cli_dir}\\"")'
-
 wizard_text = wizard_path.read_text()
-if wizard_new not in wizard_text and wizard_old in wizard_text:
-    wizard_path.write_text(wizard_text.replace(wizard_old, wizard_new))
+wizard_replacements = {
+    '        pip install -e "${REPO_DIR}/cli" --quiet 2>/dev/null || pip3 install -e "${REPO_DIR}/cli" --quiet 2>/dev/null':
+        '        bash "${REPO_DIR}/manager/scripts/install_cli.sh" "${REPO_DIR}/cli"',
+    '            pip install -e "${REPO_DIR}/cli" || pip3 install -e "${REPO_DIR}/cli"':
+        '            bash "${REPO_DIR}/manager/scripts/install_cli.sh" "${REPO_DIR}/cli"',
+    '            pip install -e "${REPO_DIR}/cli" --quiet 2>/dev/null || pip3 install -e "${REPO_DIR}/cli" --quiet 2>/dev/null':
+        '            bash "${REPO_DIR}/manager/scripts/install_cli.sh" "${REPO_DIR}/cli"',
+}
+for old, new in wizard_replacements.items():
+    wizard_text = wizard_text.replace(old, new)
+wizard_path.write_text(wizard_text)
 
 server_text = server_path.read_text()
-if server_new not in server_text and server_old in server_text:
-    server_path.write_text(server_text.replace(server_old, server_new))
+server_replacements = {
+    '        parts.append(f"pip install -e {cli_dir} --quiet 2>/dev/null || pip3 install -e {cli_dir} --quiet 2>/dev/null")':
+        '        parts.append(f"bash \\"{REPO_DIR / \'manager\' / \'scripts\' / \'install_cli.sh\'}\\" \\"{cli_dir}\\"")',
+    '            parts.append(f"pip install -e {quoted_cli_dir} || pip3 install -e {quoted_cli_dir}")':
+        '            parts.append(f"bash {shlex.quote(str(REPO_DIR / \'manager\' / \'scripts\' / \'install_cli.sh\'))} {quoted_cli_dir}")',
+    '            parts.append(\n                f"pip install -e {quoted_cli_dir} --quiet 2>/dev/null || "\n                f"pip3 install -e {quoted_cli_dir} --quiet 2>/dev/null"\n            )':
+        '            parts.append(f"bash {shlex.quote(str(REPO_DIR / \'manager\' / \'scripts\' / \'install_cli.sh\'))} {quoted_cli_dir}")',
+}
+for old, new in server_replacements.items():
+    server_text = server_text.replace(old, new)
+server_path.write_text(server_text)
 PY
 
     ok "CLI installer ready"
