@@ -2,7 +2,7 @@
 set -euo pipefail
 # install.sh — Bootstrap a server before the repo exists.
 # Download this script and run it. It installs GitHub CLI, authenticates,
-# clones the repo, then launches the setup wizard.
+# clones the repo(s), then launches the setup wizard(s).
 #
 # All credentials are entered interactively (hidden input) or via
 # environment variables. Nothing is hardcoded.
@@ -10,12 +10,22 @@ set -euo pipefail
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/engendra-labs/install/main/install.sh | bash
 #   bash install.sh
+#   bash install.sh --product assistant
 #   bash install.sh --branch feat/my-branch
 
-REPO_DIR="${HOME}/engendra"
 GITHUB_TOKEN="${GITHUB_TOKEN:-}"
 BRANCH=""
 COMMIT=""
+PRODUCT="all"
+
+# ── Product definitions ──────────────────────────────────────────────────────
+# Format: REPO|CLONE_DIR|POST_CLONE_SCRIPT
+declare -A PRODUCTS
+PRODUCTS[engendra]="engendra-labs/engendra|engendra|manager/scripts/wizard.sh"
+PRODUCTS[assistant]="engendra-labs/engendra-assistant|engendra-assistant|scripts/setup.sh"
+
+# Install order when installing all products
+PRODUCT_ORDER=(engendra assistant)
 
 # ── Colors ────────────────────────────────────────────────────────────────────
 BLUE='\033[38;5;75m'
@@ -33,16 +43,21 @@ usage() {
     cat <<EOF
 Usage: bash install.sh [OPTIONS]
 
-Prepare a server and install Engendra.
+Prepare a server and install Engendra products.
 
 Options:
-  --repo-dir PATH         Where to clone the repo (default: ~/engendra)
+  --product PRODUCT       Product to install: engendra, assistant, or all (default: all)
   --branch BRANCH         Git branch to clone/checkout (default: repo default branch)
   --commit HASH           Git commit hash to checkout after cloning
   -h, --help              Show this help message
 
+Products:
+  engendra                Main Engendra system (manager, workers, dashboard)
+  assistant               Engendra Assistant (AI assistant provisioning, admin UI)
+  all                     Both products (default)
+
 Credentials can be set via environment variables:
-  GITHUB_TOKEN            GitHub Personal Access Token (read access to engendra-labs/engendra)
+  GITHUB_TOKEN            GitHub Personal Access Token (read access to engendra-labs repos)
 
 All other credentials (API keys) are entered during the setup wizard.
 EOF
@@ -50,13 +65,20 @@ EOF
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --repo-dir)      REPO_DIR="$2";           shift 2 ;;
+        --product)       PRODUCT="$2";            shift 2 ;;
         --branch)        BRANCH="$2";             shift 2 ;;
-        --commit)        COMMIT="$2";            shift 2 ;;
+        --commit)        COMMIT="$2";             shift 2 ;;
         -h|--help)       usage; exit 0 ;;
         *) echo "Unknown option: $1" >&2; usage; exit 1 ;;
     esac
 done
+
+# Validate product
+if [[ "$PRODUCT" != "all" ]] && [[ -z "${PRODUCTS[$PRODUCT]+x}" ]]; then
+    echo "Unknown product: $PRODUCT" >&2
+    echo "Valid products: engendra, assistant, all" >&2
+    exit 1
+fi
 
 echo ""
 echo -e "  ${BOLD}${BLUE}Engendra${R} ${DIM}Installer${R}"
@@ -77,7 +99,7 @@ fi
 if ! gh auth status &>/dev/null; then
     if [[ -z "${GITHUB_TOKEN}" ]]; then
         echo ""
-        dim "A GitHub token with read access to engendra-labs/engendra is required."
+        dim "A GitHub token with read access to engendra-labs repos is required."
         echo ""
         read -rsp "  GitHub Token: " GITHUB_TOKEN </dev/tty
         echo ""
@@ -93,31 +115,52 @@ else
     ok "GitHub authenticated"
 fi
 
-# ── Step 3: Clone or update the engendra repo ────────────────────────────────
-if [[ ! -d "${REPO_DIR}/.git" ]]; then
-    step "Cloning repository..."
-    if [[ -n "${BRANCH}" ]]; then
-        gh repo clone engendra-labs/engendra "${REPO_DIR}" -- --branch "${BRANCH}"
+# ── Step 3: Install product(s) ───────────────────────────────────────────────
+install_product() {
+    local name="$1"
+    local IFS='|'
+    read -r repo clone_dir post_script <<< "${PRODUCTS[$name]}"
+    local full_clone_dir="${HOME}/${clone_dir}"
+
+    echo ""
+    step "Installing ${name}..."
+
+    if [[ ! -d "${full_clone_dir}/.git" ]]; then
+        step "Cloning ${repo}..."
+        if [[ -n "${BRANCH}" ]]; then
+            gh repo clone "${repo}" "${full_clone_dir}" -- --branch "${BRANCH}"
+        else
+            gh repo clone "${repo}" "${full_clone_dir}"
+        fi
+        ok "Repository cloned to ${full_clone_dir}"
     else
-        gh repo clone engendra-labs/engendra "${REPO_DIR}"
+        step "Pulling latest changes..."
+        if [[ -n "${BRANCH}" ]]; then
+            git -C "${full_clone_dir}" checkout "${BRANCH}"
+        fi
+        git -C "${full_clone_dir}" pull
+        ok "Repository updated"
     fi
-    ok "Repository cloned to ${REPO_DIR}"
+
+    if [[ -n "${COMMIT}" ]]; then
+        step "Checking out commit ${COMMIT}..."
+        git -C "${full_clone_dir}" checkout "${COMMIT}"
+    fi
+
+    # Run the post-clone setup script
+    echo ""
+    ok "Ready. Launching ${name} setup..."
+    echo ""
+    bash "${full_clone_dir}/${post_script}"
+}
+
+if [[ "$PRODUCT" = "all" ]]; then
+    for p in "${PRODUCT_ORDER[@]}"; do
+        install_product "$p"
+    done
 else
-    step "Pulling latest changes..."
-    if [[ -n "${BRANCH}" ]]; then
-        git -C "${REPO_DIR}" checkout "${BRANCH}"
-    fi
-    git -C "${REPO_DIR}" pull
-    ok "Repository updated"
+    install_product "$PRODUCT"
 fi
 
-if [[ -n "${COMMIT}" ]]; then
-    step "Checking out commit ${COMMIT}..."
-    git -C "${REPO_DIR}" checkout "${COMMIT}"
-fi
-
-# ── Step 4: Launch setup wizard ───────────────────────────────────────────────
 echo ""
-ok "Ready. Launching setup..."
-echo ""
-exec bash "${REPO_DIR}/manager/scripts/wizard.sh"
+ok "Installation complete."
